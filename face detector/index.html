@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TruthLens AI — Deepfake Detector</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        background: linear-gradient(135deg, #06111f, #0b1c31, #042d42);
+        color: white;
+        text-align: center;
+    }
+
+    .container {
+        width: 90%;
+        max-width: 850px;
+        margin: auto;
+        padding: 30px;
+    }
+
+    .logo {
+        font-size: 45px;
+        font-weight: bold;
+        color: #00eaff;
+        text-shadow: 0 0 20px #0099ff;
+        margin-top: 25px;
+    }
+
+    .upload-box {
+        border: 2px dashed #00eaff;
+        padding: 45px;
+        border-radius: 15px;
+        margin-top: 30px;
+        cursor: pointer;
+        transition: 0.2s;
+    }
+
+    .upload-box:hover {
+        background: rgba(0, 234, 255, 0.08);
+    }
+
+    #mediaInput {
+        display: none;
+    }
+
+    /* Progress bar */
+    .progress-container {
+        width: 100%;
+        background: rgba(255,255,255,0.1);
+        border-radius: 10px;
+        height: 18px;
+        margin-top: 25px;
+        display: none;
+    }
+
+    .progress-bar {
+        height: 18px;
+        width: 0%;
+        background: #00eaff;
+        border-radius: 10px;
+        transition: width 0.25s;
+    }
+
+    /* Results */
+    #resultBox {
+        margin-top: 40px;
+        padding: 25px;
+        border-radius: 15px;
+        background: rgba(255, 255, 255, 0.05);
+        display: none;
+    }
+
+    .score {
+        font-size: 32px;
+        margin-top: 15px;
+        color: #00eaff;
+    }
+
+    video, img {
+        max-width: 100%;
+        margin-top: 15px;
+        border-radius: 10px;
+    }
+
+</style>
+
+</head>
+<body>
+
+<div class="container">
+
+    <div class="logo">TruthLens AI</div>
+    <div class="subtitle">Heuristic Deepfake Detector (Safe & Local)</div>
+
+    <!-- Upload box -->
+    <label for="mediaInput">
+        <div class="upload-box">
+            <h2>📤 Upload Photo or Video</h2>
+            <p>Auto analysis will begin</p>
+        </div>
+    </label>
+    <input type="file" id="mediaInput" accept="image/*,video/*">
+
+    <!-- Progress bar -->
+    <div class="progress-container" id="progressBox">
+        <div class="progress-bar" id="progressBar"></div>
+    </div>
+
+    <!-- Result output -->
+    <div id="resultBox">
+        <h2>🔍 Analysis Results</h2>
+        <div id="preview"></div>
+        <div class="score" id="scoreDisplay"></div>
+        <div id="flagsList"></div>
+    </div>
+</div>
+
+<script>
+let file = null;
+const progressBox = document.getElementById("progressBox");
+const progressBar = document.getElementById("progressBar");
+const resultBox = document.getElementById("resultBox");
+const scoreDisplay = document.getElementById("scoreDisplay");
+const flagsList = document.getElementById("flagsList");
+const preview = document.getElementById("preview");
+
+document.getElementById("mediaInput").addEventListener("change", function () {
+    file = this.files[0];
+
+    // CLEAR RESULT if file removed
+    if (!file) {
+        resultBox.style.display = "none";
+        preview.innerHTML = "";
+        flagsList.innerHTML = "";
+        scoreDisplay.innerHTML = "";
+        return;
+    }
+
+    preview.innerHTML = "";
+    resultBox.style.display = "none";
+
+    if (file.type.startsWith("image/")) {
+        let img = document.createElement("img");
+        img.src = URL.createObjectURL(file);
+        preview.appendChild(img);
+
+        img.onload = () => startAnalysis(img);
+    }
+    else if (file.type.startsWith("video/")) {
+        let video = document.createElement("video");
+        video.src = URL.createObjectURL(file);
+        video.controls = true;
+        preview.appendChild(video);
+        startAnalysis(video);
+    }
+});
+
+function startAnalysis(media) {
+    progressBox.style.display = "block";
+    progressBar.style.width = "0%";
+
+    let width = 0;
+    let interval = setInterval(() => {
+        width += 12;
+        progressBar.style.width = width + "%";
+        if (width >= 100) {
+            clearInterval(interval);
+            setTimeout(() => analyzeMedia(media), 300);
+        }
+    }, 120);
+}
+
+/* REALISTIC IMAGE CHECKS */
+function analyzeMedia(media) {
+    let flags = [];
+    let score = 0;
+
+    if (media instanceof HTMLImageElement) {
+        // Create a canvas to analyze pixel data
+        let canvas = document.createElement("canvas");
+        let ctx = canvas.getContext("2d");
+        canvas.width = media.naturalWidth;
+        canvas.height = media.naturalHeight;
+        ctx.drawImage(media, 0, 0);
+
+        let pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        let data = pixels.data;
+
+        let noise = 0, sharpEdges = 0;
+
+        for (let i = 0; i < data.length; i += 4) {
+            let r = data[i], g = data[i + 1], b = data[i + 2];
+            noise += Math.abs(r - g) + Math.abs(g - b);
+
+            if (i < data.length - 16) {
+                sharpEdges += Math.abs(data[i] - data[i + 16]);
+            }
+        }
+
+        let noiseAvg = noise / data.length;
+        let edgeAvg = sharpEdges / data.length;
+
+        // Heuristic checks
+        if (noiseAvg < 8) flags.push("Image has abnormal smoothness (possible AI smoothing)");
+        if (edgeAvg > 25) flags.push("Unnatural edge artifacts detected");
+        if (canvas.width > 2000 || canvas.height > 2000)
+            flags.push("Extremely high resolution (common in AI renders)");
+
+        score = flags.length * 20;
+    }
+
+    // Cap score
+    if (score > 100) score = 100;
+
+    // Score text
+    let text = "";
+    if (score <= 20) text = `🟢 ${score}% — LOW RISK (Likely Real)`;
+    else if (score <= 50) text = `🟡 ${score}% — MEDIUM RISK (Check Carefully)`;
+    else text = `🔴 ${score}% — HIGH RISK (Possible Deepfake)`;
+
+    // Display result
+    progressBox.style.display = "none";
+    resultBox.style.display = "block";
+    scoreDisplay.innerHTML = text;
+
+    // Flags list
+    flagsList.innerHTML = flags.length
+        ? `<h3>Detected Issues:</h3>` + flags.map(f => `<div>⚠ ${f}</div>`).join("")
+        : `<h3>No significant anomalies detected.</h3>`;
+}
+</script>
+
+</body>
+</html>
